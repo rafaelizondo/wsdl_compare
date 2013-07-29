@@ -16,6 +16,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+
 import java.net.URL;
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
@@ -37,14 +38,13 @@ import java.util.regex.Pattern;
 
 public class Validate {
 	
+		//static String excelsysUrlBase = "http://ws.excelsys.co/icbs-bus-simulator-web";
+	
 	   public static void main(String args[])
 	    {
 	    	if(args.length < 2) {
 	    		System.out.println("Debes ingresar los siguientes 2 parametros:");
 	    		System.out.println("- Directorio donde quedara el archivo con el resultado del analisis.");
-//	    		System.out.print("- Directorio a partir del cual quedaran los resultados.");
-//	    		System.out.print(" Se creara una carpeta 'bank_wsdls' donde se guardaran los wsdl");
-//	    		System.out.print(" y un archivo 'differences.txt' en caso de haber diferencias.\n");
 	    		System.out.println("- URL base del banco donde estan los links a todos los WSDL.");
 	    		System.exit(0);
 	    	}
@@ -69,13 +69,17 @@ public class Validate {
 	    	
 	        List<String> missingWsdls = findMissingWsdls(bankWsdlMap, excelsysWsdlMap);
 	        
-	        Map<String,String> elementsToFindMap = new HashMap<String,String>();
-	        elementsToFindMap.put("wsdl:operation", "name");
-	        elementsToFindMap.put("wsdl:service", "name");
-	        elementsToFindMap.put("wsdl:port", "name");
-	        elementsToFindMap.put("wsdl:portType", "name");
+	        Map<String,String> elementsToCompareMap = new HashMap<String,String>();
+
+//	        elementsToCompareMap.put("operation", "name");
+//	        elementsToCompareMap.put("service", "name");
+//	        elementsToCompareMap.put("port", "name");
+//	        elementsToCompareMap.put("portType", "name");
+//	        elementsToCompareMap.put("complexType", "name");
+//	        elementsToCompareMap.put("address", "location");
+	        elementsToCompareMap.put("element", "name");
 	        
-	        List<String> WsdlsWithDifferences = getDifferences(excelsysWsdlMap,	bankWsdlMap, elementsToFindMap);
+	        Map<String, List<String>> WsdlsWithDifferences = getDifferencesOnMaps(excelsysWsdlMap,	bankWsdlMap, elementsToCompareMap);
 	        
 	        if (WsdlsWithDifferences.size() == 0 &&  missingWsdls.size() == 0)
 	        	System.out.println("Todos los WSDL son iguales");
@@ -85,12 +89,12 @@ public class Validate {
 	        	System.out.println("Hay diferencias en los WSDL");
 	        	System.out.println("Las diferencias estan en el archivo: " + fileWithDifferences);
 	        }
-	    	//System.out.println("Todos los WSDL obtenidos estan en la siguiente ruta: " + resultDir + "bank_wsdls");
 	   }
 
-	public static List<String> getDifferences(Map<String, String> excelsysWsdlMap, Map<String, String> bankWsdlMap, Map<String, String> elementsToFind)
+	public static Map<String, List<String>> getDifferencesOnMaps(Map<String, String> excelsysWsdlMap, Map<String, String> bankWsdlMap, Map<String, String> elementsToFind)
 	{
-		List<String> WsdlsWithDifferences = new ArrayList<String>();
+		Map<String,List<String>> differencesMap = new HashMap<String,List<String>>();
+		Map<String,List<String>> returnMap = new HashMap<String,List<String>>();
 		Iterator<Entry<String, String>> bankWsdlIterator = bankWsdlMap.entrySet().iterator();
 		while(bankWsdlIterator.hasNext()){
 			String key = bankWsdlIterator.next().getKey();
@@ -102,126 +106,240 @@ public class Validate {
 					Iterator<Entry<String, String>> elementIterator = elementsToFind.entrySet().iterator();
 					while(elementIterator.hasNext()){
 						String elementKey = elementIterator.next().getKey();
-						WsdlsWithDifferences.addAll(getDifferences(key, bankDoc, excelsysDoc, elementKey, elementsToFind.get(elementKey)));
+						returnMap = getDifferencesOnDocs(key, bankDoc, excelsysDoc, elementKey, elementsToFind.get(elementKey));
+						if(differencesMap.containsKey("contentDifferences")){
+							differencesMap.get("contentDifferences").addAll(returnMap.get("contentDifferences"));
+						}
+						else {
+							differencesMap.put("contentDifferences",returnMap.get("contentDifferences"));
+						}
+						if(differencesMap.containsKey("occursDifferences")){
+							differencesMap.get("occursDifferences").addAll(returnMap.get("occursDifferences"));
+						}
+						else {
+							differencesMap.put("occursDifferences",returnMap.get("occursDifferences"));
+						}
 					}
-					//WsdlsWithDifferences.addAll(getDifferences(key, bankDoc, excelsysDoc, "wsdl:operation", "name"));
-					//WsdlsWithDifferences.addAll(getDifferences(key, bankDoc, excelsysDoc, "wsdl:service", "name"));
-					//WsdlsWithDifferences.addAll(getDifferences(key, bankDoc, excelsysDoc, "wsdl:port", "name"));
-					//WsdlsWithDifferences.addAll(getDifferences(key, bankDoc, excelsysDoc, "wsdl:portType", "name"));
 				}
 
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
-		return WsdlsWithDifferences;
+		return differencesMap;
 	}
 	   
-	   public static List<String> getDifferences(String wsdlName, Document bankDoc, Document excelsysDoc, String tagName, String attributeName) 
+	   public static Map<String, List<String>> getDifferencesOnDocs(String wsdlName, Document bankDoc, Document excelsysDoc, String tagName, String attributeName) 
 	   {
-			List<String> differences = new ArrayList<String>();
+			List<String> contentDifferences = new ArrayList<String>();
+			List<String> occursDifferences = new ArrayList<String>();
+			List<String> reported = new ArrayList<String>();
+			Map<String,List<String>> differencesMap = new HashMap<String,List<String>>();
 			XPathFactory factory = XPathFactory.newInstance();
 			XPath xpath = factory.newXPath();
 			String expression;
-			expression = "//*[contains(name(), '" + tagName +"')]";
+			expression = "//*[local-name()='" + tagName + "']";
 			try {
+				
 				NodeList bankNodeList = (NodeList) xpath.evaluate(expression, bankDoc, XPathConstants.NODESET);
 				NodeList excelsysNodeList = (NodeList) xpath.evaluate(expression, excelsysDoc, XPathConstants.NODESET);
-				for (int i = 0; i < excelsysNodeList.getLength(); i++) {
-					String excelsysElement = excelsysNodeList.item(i).getAttributes().getNamedItem(attributeName).getNodeValue();
-					if(!findElementByName(excelsysElement,bankNodeList))
-						differences.add("En el wsdl '"+ wsdlName + "' no existe el elemento '" + tagName + "' con atributo " + attributeName + "='" + excelsysElement + "'.");
-			}
+				
+				
+				if(tagName.compareTo("element") == 0){
+					//List<String> occursDifferences = new ArrayList<String>();
+					//occursDifferences = findMinOccursDifferences(wsdlName, bankNodeList, excelsysNodeList);
+					occursDifferences.addAll(findMinOccursDifferences(wsdlName, bankNodeList, excelsysNodeList));
+					//if(occursDifferences.size() > 0) {
+//						differences.add("Se encontraron las siguientes diferencias de minOccurs:\n");
+					//	differences.addAll(occursDifferences);
+					//}
+				}
+				
+				for (int i = 0; i < bankNodeList.getLength(); i++) {
+					Node nodo = bankNodeList.item(i).getAttributes().getNamedItem(attributeName);
+					if(nodo != null) {
+						String bankElement = nodo.getNodeValue();
+						if(!findElementInListByAttribute(bankElement, excelsysNodeList, attributeName)) {
+							if(!reported.contains(bankElement)) {
+								reported.add(bankElement);
+								StringBuilder str = new StringBuilder();
+								str.append("En el wsdl '"+ wsdlName + "' no existe el elemento '" + tagName + "' con atributo " + attributeName + "='" + bankElement + "'. ");
+								str.append("Se encontraron estos:");
+								for (int j = 0; j < excelsysNodeList.getLength(); j++) {
+									Element node = (Element) excelsysNodeList.item(j);
+									if(!node.getAttribute(attributeName).isEmpty())
+										str.append(" '" + node.getAttribute(attributeName) + "'");
+								}
+								contentDifferences.add(str.toString());
+							}
+						}
+					}
+				}
 			} catch (XPathExpressionException e) {
 				e.printStackTrace();
 			}
 		   
-		   return differences;
+			differencesMap.put("contentDifferences", contentDifferences);
+			differencesMap.put("occursDifferences", occursDifferences);
+		   return differencesMap;
 	   }
 	   
-	   public static Document getEffectiveWsdl(Document docWsdl, String baseUrl)
+	   public static List<String> findMinOccursDifferences(String wsdlName, NodeList bankNodeList, NodeList excelsysNodeList) {
+		   
+		   String attributeName = "ref";
+		  
+		   List<String> differences = new ArrayList<String>();
+		   for (int i = 0; i < bankNodeList.getLength(); i++) {
+				Element bankElement = (Element) bankNodeList.item(i);
+				Node bankNodeAttribute = bankElement.getAttributes().getNamedItem(attributeName);
+				if(bankElement.getAttributeNode("minOccurs") != null && bankNodeAttribute != null){
+					String bankElementName = bankNodeAttribute.getNodeValue();
+					bankElementName = bankElementName.replaceFirst(".*?:", "");
+					String bankMinOccurs = bankElement.getAttributeNode("minOccurs").getNodeValue();
+					for (int j = 0; j < excelsysNodeList.getLength(); j++) {
+						Element excelsysElement = (Element) excelsysNodeList.item(j);
+						if(excelsysElement.getAttributes().getNamedItem(attributeName) != null){
+							String excelsysMinOccurs = null;
+							if(excelsysElement.getAttributeNode("minOccurs") == null){
+								excelsysMinOccurs = "-1";
+							}
+							else
+							{
+								excelsysMinOccurs = excelsysElement.getAttributeNode("minOccurs").getNodeValue();
+							}
+							String excelsysElementName = excelsysElement.getAttributes().getNamedItem(attributeName).getNodeValue();
+							excelsysElementName = excelsysElementName.replaceFirst(".*?:", "");
+							if(bankElementName.compareTo(excelsysElementName) == 0)
+							{
+								StringBuilder bankAncestryLine = new StringBuilder();
+								bankAncestryLine.append(bankElementName);
+								Node nodeAncestry = bankElement.getParentNode();
+								while(nodeAncestry != null){
+									if(nodeAncestry.getAttributes() != null) {
+										if(nodeAncestry.getAttributes().getNamedItem("name") != null){
+											bankAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("name").getNodeValue());
+										}
+										if(nodeAncestry.getAttributes().getNamedItem("base") != null){
+											bankAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("base").getNodeValue().replaceFirst(".*?:", ""));
+										}
+									}
+									nodeAncestry = nodeAncestry.getParentNode();
+								}
+								StringBuilder excelsysAncestryLine = new StringBuilder();
+								excelsysAncestryLine.append(excelsysElementName);
+								nodeAncestry = excelsysElement.getParentNode();
+								while(nodeAncestry != null){
+									if(nodeAncestry.getAttributes() != null) {
+										if(nodeAncestry.getAttributes().getNamedItem("name") != null){
+											excelsysAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("name").getNodeValue());
+										}
+										if(nodeAncestry.getAttributes().getNamedItem("base") != null){
+											excelsysAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("base").getNodeValue().replaceFirst(".*?:", ""));
+										}
+									}
+									nodeAncestry = nodeAncestry.getParentNode();
+								}
+								if(excelsysAncestryLine.toString().contains(bankAncestryLine) && bankMinOccurs.compareTo(excelsysMinOccurs) != 0) {
+									/*
+									System.out.print(wsdlName + ": ");
+									System.out.print(bankAncestryLine);
+									System.out.print(" | ");
+									System.out.print(excelsysAncestryLine);
+									System.out.print(" | bankMinOccurs: " + bankMinOccurs + ", excelsysMinOccurs: " + excelsysMinOccurs + "\n");
+									*/
+									differences.add("En " + wsdlName + ": " + bankAncestryLine + " se encuentra con ocurrencia = " + bankAncestryLine
+													+ " | " + excelsysAncestryLine + "con ocurrencia = " + excelsysMinOccurs);
+								}
+							}
+						}
+					}
+				}
+						
+		   }
+		   
+		return differences;
+	}
+	   
+	public static List<String> findAncestry(Node node, List<String> nearAncestry) {
+		List<String> ancestry = new ArrayList<String>();
+		
+		
+		return ancestry;
+	}
+
+	public static Document getEffectiveWsdl(Document docWsdl, String baseUrl)
 	   {
-		   XPathFactory factory = XPathFactory.newInstance();
-		   XPath xpath = factory.newXPath();
-		   String expression;
-			expression = "//*[contains(name(), 'wsdl:import')]";
-			try {
-				NodeList importNodeList = (NodeList) xpath.evaluate(expression, docWsdl, XPathConstants.NODESET);
-				for (int i = 0; i < importNodeList.getLength(); i++) {
-					String location = importNodeList.item(i).getAttributes().getNamedItem("location").getNodeValue();
-					//System.out.println("     Estos son los import: " + location);
-					if(!location.startsWith("http://")) {
-						if(location.startsWith("/"))
-							location = location.substring(1);
-						location =  baseUrl + location;
-					}
-					String xmlImported = getBodyFromUrl(location);
-					Document importedDoc = loadXMLFromString(xmlImported);
-					importedDoc = getEffectiveWsdl(importedDoc,baseUrl);
-					Element docElement = importedDoc.getDocumentElement();
-					if (importNodeList.item(i).getParentNode() == null)
-						System.out.println("importNodeList no tiene padre");
-					else
-					{
-						Node firstDocImportedNode = docWsdl.importNode(docElement, true);
-						importNodeList.item(i).getParentNode().appendChild(firstDocImportedNode);
-					}
-				}
-				expression = "//*[contains(name(), 'xsd:include')]";
-				importNodeList = (NodeList) xpath.evaluate(expression, docWsdl, XPathConstants.NODESET);
-				for (int i = 0; i < importNodeList.getLength(); i++) {
-					String location = importNodeList.item(i).getAttributes().getNamedItem("schemaLocation").getNodeValue();
-					//System.out.println("     Estos son los import de xsd: " + location);
-					if(!location.startsWith("http://")) {
-						if(location.startsWith("/"))
-							location = location.substring(1);
-						location =  baseUrl + location;
-					}
-					String xmlImported = getBodyFromUrl(location);
-					Document importedDoc = loadXMLFromString(xmlImported);
-					importedDoc = getEffectiveWsdl(importedDoc,baseUrl);
-					Element docElement = importedDoc.getDocumentElement();
-					if (importNodeList.item(i).getParentNode() == null)
-						System.out.println("importNodeList no tiene padre");
-					else
-					{
-						Node firstDocImportedNode = docWsdl.importNode(docElement, true);
-						importNodeList.item(i).getParentNode().appendChild(firstDocImportedNode);
-					}
-				}
-				expression = "//*[contains(name(), 'xsd:import')]";
-				importNodeList = (NodeList) xpath.evaluate(expression, docWsdl, XPathConstants.NODESET);
-				for (int i = 0; i < importNodeList.getLength(); i++) {
-					String location = importNodeList.item(i).getAttributes().getNamedItem("schemaLocation").getNodeValue();
-					//System.out.println("     Estos son los import de xsd: " + location);
-					if(!location.startsWith("http://")) {
-						if(location.startsWith("/"))
-							location = location.substring(1);
-						location =  baseUrl + location;
-					}
-					String xmlImported = getBodyFromUrl(location);
-					Document importedDoc = loadXMLFromString(xmlImported);
-					importedDoc = getEffectiveWsdl(importedDoc,baseUrl);
-					Element docElement = importedDoc.getDocumentElement();
-					if (importNodeList.item(i).getParentNode() == null)
-						System.out.println("importNodeList no tiene padre");
-					else
-					{
-						Node firstDocImportedNode = docWsdl.importNode(docElement, true);
-						importNodeList.item(i).getParentNode().appendChild(firstDocImportedNode);
-					}
-				}
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
+		   Map<String,String> importMap = new HashMap<String,String>();
+		   importMap.put("wsdl:import", "location");
+		   importMap.put("xsd:include", "schemaLocation");
+		   importMap.put("xsd:import", "schemaLocation");
+
+		   List<String> urlVisited = new ArrayList<String>();
+
+		   docWsdl = appendImportsAndIncludes(docWsdl, baseUrl, importMap, urlVisited);
+		   
 			return docWsdl;
 	   }
 	   
-	   public static boolean findElementByName(String elementName, NodeList nodeList)
+	   public static Document appendImportsAndIncludes(Document docWsdl, String baseUrl, Map<String,String> importMap, List<String> urlVisited)
 	   {
-		   for (int i = 0; i < nodeList.getLength(); i++) {
-			   if(elementName.compareTo(nodeList.item(i).getAttributes().getNamedItem("name").getNodeValue()) == 0)
-				   return true;
+		   String importToFind;
+		   String attributeLocation;
+		   XPathFactory factory = XPathFactory.newInstance();
+		   XPath xpath = factory.newXPath();
+		   String expression;
+		   
+		   Iterator<Entry<String, String>> iterator = importMap.entrySet().iterator();
+	        while(iterator.hasNext()){
+	        	importToFind = iterator.next().getKey();
+	        	attributeLocation = importMap.get(importToFind);
+				try {
+					expression = "//*[contains(name(), '" + importToFind +"')]";
+					NodeList importNodeList = (NodeList) xpath.evaluate(expression, docWsdl, XPathConstants.NODESET);
+					for (int i = 0; i < importNodeList.getLength(); i++) {
+						String location = importNodeList.item(i).getAttributes().getNamedItem(attributeLocation).getNodeValue();
+						
+						if(!urlVisited.contains(location)) {
+							urlVisited.add(location);
+							if(!location.startsWith("http://")) {
+								if(location.startsWith("/"))
+									location = location.substring(1);
+								location =  baseUrl + location;
+							}
+							String xmlImported = getBodyFromUrl(location);
+							Document importedDoc = loadXMLFromString(xmlImported);
+							importedDoc = appendImportsAndIncludes(importedDoc, baseUrl, importMap, urlVisited);
+							Element docElement = importedDoc.getDocumentElement();
+							Node firstDocImportedNode = docWsdl.importNode(docElement, true);
+							importNodeList.item(i).getParentNode().appendChild(firstDocImportedNode);
+						}
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+	        }
+			return docWsdl;
+	   }
+	   
+	   public static boolean findElementInListByAttribute(String excelsysElement, NodeList bankNodeList, String attributeName)
+	   {
+		   for (int i = 0; i < bankNodeList.getLength(); i++) {
+			   Node nodo = bankNodeList.item(i).getAttributes().getNamedItem(attributeName);
+			   if(nodo != null) {
+				   String bankElement = nodo.getNodeValue();
+				   if(attributeName.compareTo("location") == 0) {
+				       if(bankElement.endsWith(excelsysElement))
+				    	   return true;
+				   }
+				   else {
+					   if(attributeName.compareTo("ref") == 0) {
+						   bankElement = bankElement.replaceFirst(".*:", "");
+						   excelsysElement = excelsysElement.replaceFirst(".*:", "");
+					   }
+					   if(excelsysElement.compareTo(bankElement) == 0)
+						   return true;
+				   }
+			   }
 		   }
 		   return false;
 	   }
@@ -246,11 +364,9 @@ public class Validate {
 				String url = strUrl + name.replaceFirst("-", "/") + "?wsdl";
 				String body = getBodyFromUrl(url);
 				if(body == null){
-		    		//System.out.println("No se pudo obtener el body de esta url: " + url);
 		    		body = "";
 		    	}
 				if(body.contains("html")){
-		    		//System.out.println("Esta url respondio un html: " + url);
 		    		body = "";
 		    	}	
 				if(body.compareTo("") != 0) {
@@ -269,9 +385,10 @@ public class Validate {
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
+					if(!wsdlMap.containsValue(body)){
+						wsdlMap.put(name, body);
+					}
 				}
-					
-	        	wsdlMap.put(name, body);
 	        }
 
 	        return wsdlMap;   			
@@ -340,7 +457,6 @@ public class Validate {
 			        String content = IOUtils.toString(inputStream);
 			        inputStream.close();
 			        String key = file.replaceFirst(".xml", "").replaceFirst(".*excelsys_wsdls/", "");
-			        
 
 			        Document excelsysDoc = loadXMLFromString(content);
 					excelsysDoc = getEffectiveWsdl(excelsysDoc, "");
@@ -351,7 +467,6 @@ public class Validate {
 					Transformer transformer = tf.newTransformer();
 					transformer.transform(domSource, result);
 					content = normalizeBody(writer.toString());
-
 			        
 					wsdlMap.put(key, content);
 	        	} catch (FileNotFoundException e) {
@@ -409,7 +524,7 @@ public class Validate {
 	    	}
 	    }
 	    
-	    private static void writeDiffInAFile(List<String> wsdlsWithDifferences, List<String> missingWsdls, String strFile)
+	    private static void writeDiffInAFile(Map<String,List<String>> wsdlsWithDifferences, List<String> missingWsdls, String strFile)
 	    {
 	    	try {
 		    	File file = new File(strFile);
@@ -425,13 +540,18 @@ public class Validate {
 						content.append(missing + "\n");
 					}
 				}
-				if(wsdlsWithDifferences.size() > 0) {
+				if(wsdlsWithDifferences.get("contentDifferences").size() > 0) {
 					content.append("\nWSDLs con diferencias en el contenido:\n\n");
-					for(String different : wsdlsWithDifferences){
+					for(String different : wsdlsWithDifferences.get("contentDifferences")){
 						content.append(different + "\n");
 					}
 				}
-				bw.write(content.toString());			
+				if(wsdlsWithDifferences.get("occursDifferences").size() > 0) {
+					content.append("\nWSDLs con diferencias en la definicion de minOccurs:\n\n");
+					for(String different : wsdlsWithDifferences.get("occursDifferences")){
+						content.append(different + "\n");
+					}
+				}				bw.write(content.toString());			
 				bw.close();
 	    	}
 	    	catch(IOException e){

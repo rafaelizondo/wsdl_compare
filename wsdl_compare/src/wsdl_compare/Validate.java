@@ -84,10 +84,9 @@ public class Validate {
 	        if (WsdlsWithDifferences.size() == 0 &&  missingWsdls.size() == 0)
 	        	System.out.println("Todos los WSDL son iguales");
 	        else {
-	        	String fileWithDifferences = resultDir + "differences.txt";
-	        	writeDiffInAFile(WsdlsWithDifferences, missingWsdls, fileWithDifferences);
+	        	writeDiffInAFile(WsdlsWithDifferences, missingWsdls, resultDir);
 	        	System.out.println("Hay diferencias en los WSDL");
-	        	System.out.println("Las diferencias estan en el archivo: " + fileWithDifferences);
+	        	System.out.println("Las diferencias estan en el archivo: " + resultDir + "differences.txt");
 	        }
 	   }
 
@@ -146,13 +145,7 @@ public class Validate {
 				
 				
 				if(tagName.compareTo("element") == 0){
-					//List<String> occursDifferences = new ArrayList<String>();
-					//occursDifferences = findMinOccursDifferences(wsdlName, bankNodeList, excelsysNodeList);
 					occursDifferences.addAll(findMinOccursDifferences(wsdlName, bankNodeList, excelsysNodeList));
-					//if(occursDifferences.size() > 0) {
-//						differences.add("Se encontraron las siguientes diferencias de minOccurs:\n");
-					//	differences.addAll(occursDifferences);
-					//}
 				}
 				
 				for (int i = 0; i < bankNodeList.getLength(); i++) {
@@ -163,7 +156,7 @@ public class Validate {
 							if(!reported.contains(bankElement)) {
 								reported.add(bankElement);
 								StringBuilder str = new StringBuilder();
-								str.append("En el wsdl '"+ wsdlName + "' no existe el elemento '" + tagName + "' con atributo " + attributeName + "='" + bankElement + "'. ");
+								str.append("En el wsdl '"+ wsdlName.replaceFirst("-", "/") + "' no existe '" + tagName + "' con atributo " + attributeName + "='" + bankElement + "'. ");
 								str.append("Se encontraron estos:");
 								for (int j = 0; j < excelsysNodeList.getLength(); j++) {
 									Element node = (Element) excelsysNodeList.item(j);
@@ -187,6 +180,7 @@ public class Validate {
 	   public static List<String> findMinOccursDifferences(String wsdlName, NodeList bankNodeList, NodeList excelsysNodeList) {
 		   
 		   String attributeName = "ref";
+		   String otherAttributeName = "name";
 		  
 		   List<String> differences = new ArrayList<String>();
 		   for (int i = 0; i < bankNodeList.getLength(); i++) {
@@ -198,7 +192,7 @@ public class Validate {
 					String bankMinOccurs = bankElement.getAttributeNode("minOccurs").getNodeValue();
 					for (int j = 0; j < excelsysNodeList.getLength(); j++) {
 						Element excelsysElement = (Element) excelsysNodeList.item(j);
-						if(excelsysElement.getAttributes().getNamedItem(attributeName) != null){
+						if(excelsysElement.getAttributes().getNamedItem(attributeName) != null || excelsysElement.getAttributes().getNamedItem(otherAttributeName) != null){
 							String excelsysMinOccurs = null;
 							if(excelsysElement.getAttributeNode("minOccurs") == null){
 								excelsysMinOccurs = "-1";
@@ -207,48 +201,28 @@ public class Validate {
 							{
 								excelsysMinOccurs = excelsysElement.getAttributeNode("minOccurs").getNodeValue();
 							}
-							String excelsysElementName = excelsysElement.getAttributes().getNamedItem(attributeName).getNodeValue();
+							String excelsysElementName = "";
+							if(excelsysElement.getAttributes().getNamedItem(attributeName) != null)
+								excelsysElementName = excelsysElement.getAttributes().getNamedItem(attributeName).getNodeValue();
+							if(excelsysElement.getAttributes().getNamedItem(otherAttributeName) != null)
+								excelsysElementName = excelsysElement.getAttributes().getNamedItem(otherAttributeName).getNodeValue();
+							
 							excelsysElementName = excelsysElementName.replaceFirst(".*?:", "");
 							if(bankElementName.compareTo(excelsysElementName) == 0)
 							{
-								StringBuilder bankAncestryLine = new StringBuilder();
-								bankAncestryLine.append(bankElementName);
-								Node nodeAncestry = bankElement.getParentNode();
-								while(nodeAncestry != null){
-									if(nodeAncestry.getAttributes() != null) {
-										if(nodeAncestry.getAttributes().getNamedItem("name") != null){
-											bankAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("name").getNodeValue());
-										}
-										if(nodeAncestry.getAttributes().getNamedItem("base") != null){
-											bankAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("base").getNodeValue().replaceFirst(".*?:", ""));
-										}
-									}
-									nodeAncestry = nodeAncestry.getParentNode();
-								}
-								StringBuilder excelsysAncestryLine = new StringBuilder();
-								excelsysAncestryLine.append(excelsysElementName);
-								nodeAncestry = excelsysElement.getParentNode();
-								while(nodeAncestry != null){
-									if(nodeAncestry.getAttributes() != null) {
-										if(nodeAncestry.getAttributes().getNamedItem("name") != null){
-											excelsysAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("name").getNodeValue());
-										}
-										if(nodeAncestry.getAttributes().getNamedItem("base") != null){
-											excelsysAncestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("base").getNodeValue().replaceFirst(".*?:", ""));
-										}
-									}
-									nodeAncestry = nodeAncestry.getParentNode();
-								}
+								StringBuilder bankAncestryLine = findAncestryLine(bankElement, bankElementName);
+								StringBuilder excelsysAncestryLine = findAncestryLine(excelsysElement, excelsysElementName);
+
 								if(excelsysAncestryLine.toString().contains(bankAncestryLine) && bankMinOccurs.compareTo(excelsysMinOccurs) != 0) {
-									/*
-									System.out.print(wsdlName + ": ");
-									System.out.print(bankAncestryLine);
-									System.out.print(" | ");
-									System.out.print(excelsysAncestryLine);
-									System.out.print(" | bankMinOccurs: " + bankMinOccurs + ", excelsysMinOccurs: " + excelsysMinOccurs + "\n");
-									*/
-									differences.add("En " + wsdlName + ": " + bankAncestryLine + " se encuentra con ocurrencia = " + bankAncestryLine
-													+ " | " + excelsysAncestryLine + "con ocurrencia = " + excelsysMinOccurs);
+									if(!(bankMinOccurs.compareTo("0") == 0 && excelsysMinOccurs.compareTo("-1") == 0)) {
+										String output = wsdlName.replaceFirst("-", "/") + "| Banco: " + bankAncestryLine + " se encuentra con ocurrencia = " + bankMinOccurs
+												+ " | Excelsys: " + excelsysAncestryLine;
+										if(excelsysMinOccurs.compareTo("-1") == 0)
+											output = output.concat(" no esta definido.");
+										else
+											output = output.concat(" con ocurrencia = " + excelsysMinOccurs);
+										differences.add(output);
+									}
 								}
 							}
 						}
@@ -259,13 +233,26 @@ public class Validate {
 		   
 		return differences;
 	}
-	   
-	public static List<String> findAncestry(Node node, List<String> nearAncestry) {
-		List<String> ancestry = new ArrayList<String>();
-		
-		
-		return ancestry;
+
+	public static StringBuilder findAncestryLine(Element element, String elementName) {
+		StringBuilder ancestryLine = new StringBuilder();
+		ancestryLine.append(elementName);
+		Node nodeAncestry = element.getParentNode();
+		while(nodeAncestry != null){
+			if(nodeAncestry.getAttributes() != null) {
+				if(nodeAncestry.getAttributes().getNamedItem("name") != null){
+					ancestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("name").getNodeValue());
+				}
+				if(nodeAncestry.getAttributes().getNamedItem("base") != null){
+					ancestryLine.append("=>" + nodeAncestry.getAttributes().getNamedItem("base").getNodeValue().replaceFirst(".*?:", ""));
+				}
+			}
+			nodeAncestry = nodeAncestry.getParentNode();
+		}
+		return ancestryLine;
 	}
+	   
+
 
 	public static Document getEffectiveWsdl(Document docWsdl, String baseUrl)
 	   {
@@ -321,22 +308,22 @@ public class Validate {
 			return docWsdl;
 	   }
 	   
-	   public static boolean findElementInListByAttribute(String excelsysElement, NodeList bankNodeList, String attributeName)
+	   public static boolean findElementInListByAttribute(String bankElement, NodeList excelsysNodeList, String attributeName)
 	   {
-		   for (int i = 0; i < bankNodeList.getLength(); i++) {
-			   Node nodo = bankNodeList.item(i).getAttributes().getNamedItem(attributeName);
+		   for (int i = 0; i < excelsysNodeList.getLength(); i++) {
+			   Node nodo = excelsysNodeList.item(i).getAttributes().getNamedItem(attributeName);
 			   if(nodo != null) {
-				   String bankElement = nodo.getNodeValue();
+				   String excelsysElement = nodo.getNodeValue();
 				   if(attributeName.compareTo("location") == 0) {
 				       if(bankElement.endsWith(excelsysElement))
 				    	   return true;
 				   }
 				   else {
 					   if(attributeName.compareTo("ref") == 0) {
-						   bankElement = bankElement.replaceFirst(".*:", "");
 						   excelsysElement = excelsysElement.replaceFirst(".*:", "");
+						   bankElement = bankElement.replaceFirst(".*:", "");
 					   }
-					   if(excelsysElement.compareTo(bankElement) == 0)
+					   if(bankElement.compareTo(excelsysElement) == 0)
 						   return true;
 				   }
 			   }
@@ -406,12 +393,11 @@ public class Validate {
 			    	encoding = encoding == null ? "UTF-8" : encoding;
 			    	return IOUtils.toString(in, encoding);
 			    }
-		    	return "";
 	    	}
 	    	catch(IOException e){
-	    		System.out.println(e.getMessage());
-	    		return null;
+	    		e.printStackTrace();
 	    	}
+	    	return "";
 	    }
 	    
 	    public static String normalizeBody(String body)
@@ -469,6 +455,7 @@ public class Validate {
 					content = normalizeBody(writer.toString());
 			        
 					wsdlMap.put(key, content);
+
 	        	} catch (FileNotFoundException e) {
 					e.printStackTrace();
 	    	    } catch (IOException e) {
@@ -520,14 +507,15 @@ public class Validate {
 		        }
 	    	}
 	    	catch(IOException e){
-	    		System.out.println(e.getMessage());
+	    		e.printStackTrace();
 	    	}
 	    }
 	    
-	    private static void writeDiffInAFile(Map<String,List<String>> wsdlsWithDifferences, List<String> missingWsdls, String strFile)
+	    private static void writeDiffInAFile(Map<String,List<String>> wsdlsWithDifferences, List<String> missingWsdls, String resultDir)
 	    {
+	    	String fileWithDifferences = resultDir + "differences.txt";
 	    	try {
-		    	File file = new File(strFile);
+		    	File file = new File(fileWithDifferences);
 		    	if (!file.exists()) {
 					file.createNewFile();
 				}
@@ -547,15 +535,52 @@ public class Validate {
 					}
 				}
 				if(wsdlsWithDifferences.get("occursDifferences").size() > 0) {
+					
 					content.append("\nWSDLs con diferencias en la definicion de minOccurs:\n\n");
 					for(String different : wsdlsWithDifferences.get("occursDifferences")){
 						content.append(different + "\n");
 					}
-				}				bw.write(content.toString());			
+				}				
+				bw.write(content.toString());			
 				bw.close();
+
+				String minDifDir = resultDir + "minoccurs_differences/";
+		    	File dir = new File(minDifDir);
+		    	if (!dir.exists())
+		    		dir.mkdir();
+		    	
+				if(wsdlsWithDifferences.get("occursDifferences").size() > 0) {
+					String currentWsdl = "";
+					content = new StringBuilder();
+					for(String different : wsdlsWithDifferences.get("occursDifferences")){
+						String wsdl = different.replaceFirst("\\|.*", "");
+						if(currentWsdl.compareTo("") == 0) {
+							currentWsdl = wsdl;
+							content.append(different.replaceFirst(".*?\\| ", "") + "\n");
+						}
+						else {
+							if(wsdl.compareTo(currentWsdl) == 0) {
+								content.append(different.replaceFirst(".*?\\| ", "") + "\n");
+							}
+							else {
+								file = new File(minDifDir + currentWsdl.replaceFirst("/", "-") + ".txt");
+						    	if (!file.exists()) {
+									file.createNewFile();
+								}
+						    	fw = new FileWriter(file.getAbsoluteFile());
+								bw = new BufferedWriter(fw);
+						    	bw.write(content.toString());			
+								bw.close();
+								currentWsdl = wsdl;
+								content = new StringBuilder();
+								content.append(different.replaceFirst(".*?\\| ", "") + "\n");
+							}
+						}
+					}
+				}				
 	    	}
 	    	catch(IOException e){
-	    		System.out.println(e.getMessage());
+	    		e.printStackTrace();
 	    	}
 		}
 
